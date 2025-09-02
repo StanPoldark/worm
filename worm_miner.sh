@@ -524,7 +524,7 @@ burn_eth_for_beth() {
     echo -e "${GREEN}[*] Starting burn process...${NC}"
     cd "$MINER_DIR"
     
-    if "$worm_miner_bin" burn \
+    if "$WORM_MINER_BIN" burn \
         --network sepolia \
         --private-key "$private_key" \
         --custom-rpc "$fastest_rpc" \
