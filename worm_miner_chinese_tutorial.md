@@ -68,11 +68,11 @@ openssl rand -hex 32 | sed 's/^/0x/'
 
 ```bash
 # 1. 下载脚本
-wget -O worm-miner-enhanced.sh https://your-script-url.com
-chmod +x worm-miner-enhanced.sh
+wget -O worm-miner.sh https://raw.githubusercontent.com/StanPoldark/worm/refs/heads/main/worm_miner.sh
+chmod +x worm-miner.sh
 
 # 2. 运行脚本
-./worm-miner-enhanced.sh
+./worm-miner.sh
 
 # 3. 选择选项 1 进行完整安装
 ```
@@ -378,7 +378,7 @@ curl -X POST -H "Content-Type: application/json" \
   https://sepolia.drpc.org
 
 # 使用脚本自动找最快 RPC
-./worm-miner-enhanced.sh
+./worm-miner.sh
 # 选择选项 8
 ```
 
@@ -570,7 +570,7 @@ ping google.com
 curl https://sepolia.drpc.org
 
 # 重新选择最快 RPC
-./worm-miner-enhanced.sh  # 选择选项 8
+./worm-miner.sh  # 选择选项 8
 ```
 
 ### 服务问题
