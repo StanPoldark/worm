@@ -543,6 +543,135 @@ burn_eth_for_beth() {
     fi
 }
 
+# Batch burn function with loop support
+batch_burn_eth_for_beth() {
+    echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH ===${NC}"
+    
+    local private_key
+    private_key=$(get_private_key) || return 1
+    
+    local fastest_rpc
+    if [[ -f "$RPC_FILE" ]]; then
+        fastest_rpc=$(cat "$RPC_FILE")
+    else
+        find_fastest_rpc
+        fastest_rpc=$(cat "$RPC_FILE")
+    fi
+    
+    # Show current balance first
+    echo -e "${CYAN}Current balances:${NC}"
+    "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+    echo ""
+    
+    # Get batch parameters
+    local amount_per_burn burn_count total_amount
+    while true; do
+        read -p "Enter ETH amount per burn (e.g., 1.0): " amount_per_burn
+        if [[ $amount_per_burn =~ ^[0-9]+\.?[0-9]*$ ]] && (( $(echo "$amount_per_burn > 0" | bc -l) )); then
+            break
+        else
+            echo -e "${RED}Please enter a valid positive number${NC}"
+        fi
+    done
+    
+    while true; do
+        read -p "Enter number of burns to execute: " burn_count
+        if [[ $burn_count =~ ^[0-9]+$ ]] && [[ $burn_count -gt 0 ]]; then
+            break
+        else
+            echo -e "${RED}Please enter a valid positive integer${NC}"
+        fi
+    done
+    
+    total_amount=$(echo "scale=6; $amount_per_burn * $burn_count" | bc)
+    
+    # Get spend and fee ratios
+    local spend_ratio fee_ratio
+    echo -e "${CYAN}Setting up burn parameters:${NC}"
+    read -p "Enter spend ratio (0-1, default 0.999): " spend_ratio
+    [[ -z "$spend_ratio" ]] && spend_ratio="0.999"
+    
+    fee_ratio=$(echo "scale=6; 1 - $spend_ratio" | bc)
+    
+    # Get delay between burns
+    local delay_seconds
+    read -p "Enter delay between burns in seconds (default 5): " delay_seconds
+    [[ -z "$delay_seconds" ]] && delay_seconds="5"
+    
+    # Confirmation
+    echo -e "${YELLOW}${BOLD}BATCH BURN CONFIRMATION:${NC}"
+    echo -e "  Amount per burn: ${BOLD}$amount_per_burn ETH${NC}"
+    echo -e "  Number of burns: ${BOLD}$burn_count${NC}"
+    echo -e "  Total ETH needed: ${BOLD}$total_amount ETH${NC}"
+    echo -e "  Spend ratio: ${BOLD}$spend_ratio${NC} (Fee ratio: $fee_ratio)"
+    echo -e "  Delay between burns: ${BOLD}$delay_seconds seconds${NC}"
+    echo -e "  Using RPC: ${DIM}$fastest_rpc${NC}"
+    echo ""
+    read -p "Proceed with batch burn? [y/N]: " confirm
+    
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+        log_info "Batch burn cancelled by user"
+        return 0
+    fi
+    
+    echo -e "${GREEN}[*] Starting batch burn process...${NC}"
+    cd "$MINER_DIR"
+    
+    local success_count=0
+    local failed_count=0
+    
+    for ((i=1; i<=burn_count; i++)); do
+        echo -e "${CYAN}[*] Executing burn $i/$burn_count...${NC}"
+        
+        local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
+        local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
+        
+        if "$WORM_MINER_BIN" burn \
+            --network sepolia \
+            --private-key "$private_key" \
+            --custom-rpc "$fastest_rpc" \
+            --amount "$amount_per_burn" \
+            --spend "$spend" \
+            --fee "$fee"; then
+            
+            ((success_count++))
+            echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
+        else
+            ((failed_count++))
+            echo -e "${RED}[-] Burn $i failed${NC}"
+            
+            read -p "Continue with remaining burns? [y/N]: " continue_batch
+            if [[ ! "$continue_batch" =~ ^[yY]$ ]]; then
+                echo -e "${YELLOW}Batch burn stopped by user${NC}"
+                break
+            fi
+        fi
+        
+        # Add delay between burns (except for the last one)
+        if [[ $i -lt $burn_count ]]; then
+            echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
+            sleep "$delay_seconds"
+        fi
+    done
+    
+    # Summary
+    echo -e "${BOLD}${GREEN}=== BATCH BURN SUMMARY ===${NC}"
+    echo -e "  Successful burns: ${GREEN}$success_count${NC}"
+    echo -e "  Failed burns: ${RED}$failed_count${NC}"
+    echo -e "  Total burns attempted: $((success_count + failed_count))${NC}"
+    
+    if [[ $success_count -gt 0 ]]; then
+        local total_burned=$(echo "scale=6; $success_count * $amount_per_burn" | bc)
+        echo -e "  Total ETH burned: ${BOLD}$total_burned ETH${NC}"
+        
+        # Show updated balance
+        echo -e "${GREEN}Updated balances:${NC}"
+        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+    fi
+    
+    log_info "Batch burn process completed: $success_count successful, $failed_count failed"
+}
+
 # Enhanced mining participation
 participate_mining() {
     echo -e "${BOLD}${PURPLE}=== PARTICIPATE IN MINING ===${NC}"
@@ -1062,16 +1191,17 @@ main_menu() {
         fi
         
         echo "3.  🔥 Burn ETH for BETH"
-        echo "4.  ⛏️  Participate in Mining"  
-        echo "5.  💰 Claim WORM Rewards"
-        echo "6.  📊 Check Balances & Info"
-        echo "7.  📝 View Miner Logs"
-        echo "8.  🌐 Find & Set Fastest RPC"
-        echo "9.  ⚙️  Advanced Options"
-        echo "10. 🗑️  Uninstall Miner"
-        echo "11. ❌ Exit"
+        echo "4.  🔥🔄 Batch Burn ETH (Loop)"
+        echo "5.  ⛏️  Participate in Mining"  
+        echo "6.  💰 Claim WORM Rewards"
+        echo "7.  📊 Check Balances & Info"
+        echo "8.  📝 View Miner Logs"
+        echo "9.  🌐 Find & Set Fastest RPC"
+        echo "10. ⚙️  Advanced Options"
+        echo "11. 🗑️  Uninstall Miner"
+        echo "12. ❌ Exit"
         echo -e "${GREEN}-------------------${NC}"
-        read -p "Enter choice [1-11]: " action
+        read -p "Enter choice [1-12]: " action
         
         case $action in
             1)
@@ -1092,32 +1222,35 @@ main_menu() {
                 burn_eth_for_beth
                 ;;
             4)
-                participate_mining
+                batch_burn_eth_for_beth
                 ;;
             5)
-                claim_rewards
+                participate_mining
                 ;;
             6)
-                check_balances
+                claim_rewards
                 ;;
             7)
-                view_logs
+                check_balances
                 ;;
             8)
-                find_fastest_rpc
+                view_logs
                 ;;
             9)
-                advanced_mining_menu
+                find_fastest_rpc
                 ;;
             10)
-                uninstall_miner
+                advanced_mining_menu
                 ;;
             11)
+                uninstall_miner
+                ;;
+            12)
                 echo -e "${GREEN}[*] Thank you for using WORM Miner! Goodbye!${NC}"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}Invalid choice. Please enter a number from 1 to 11.${NC}"
+                echo -e "${RED}Invalid choice. Please enter a number from 1 to 12.${NC}"
                 ;;
         esac
         
