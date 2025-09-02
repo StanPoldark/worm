@@ -83,6 +83,16 @@ check_system_requirements() {
     log_info "System requirements check passed: ${total_mem_gb}GB RAM, ${available_space_gb}GB available"
 }
 
+# Check if miner is installed
+check_miner_installed() {
+    [[ -f "$WORM_MINER_BIN" ]] && [[ -d "$MINER_DIR" ]]
+}
+
+# Check if miner is configured (has private key and service)
+check_miner_configured() {
+    [[ -f "$KEY_FILE" ]] && [[ -f "/etc/systemd/system/worm-miner.service" ]]
+}
+
 # Get private key with validation
 get_private_key() {
     if [[ ! -f "$KEY_FILE" ]]; then
@@ -275,16 +285,35 @@ install_miner() {
     local version=$("$WORM_MINER_BIN" --version 2>/dev/null || echo "unknown")
     log_info "Miner installed successfully: $version"
     
-    # Find fastest RPC
-    find_fastest_rpc
+    echo -e "${BOLD}${GREEN}[+] WORM Miner installation completed successfully!${NC}"
+    echo -e "${YELLOW}[!] Please use Option 2 to configure your miner (setup private key and service).${NC}"
+}
+
+# Setup configuration for already installed miner
+setup_miner_config() {
+    echo -e "${BOLD}${GREEN}=== WORM MINER CONFIGURATION ===${NC}"
     
-    # Get and validate private key
+    if ! check_miner_installed; then
+        log_error "Miner is not installed. Please install first (Option 1)."
+        return 1
+    fi
+    
+    # Create necessary directories if they don't exist
+    mkdir -p "$CONFIG_DIR" "$BACKUP_DIR"
+    touch "$LOG_FILE"
+    
+    # Find fastest RPC if not already done
+    if [[ ! -f "$RPC_FILE" ]]; then
+        find_fastest_rpc
+    fi
+    
+    # Setup or update private key
     setup_private_key
     
-    # Create systemd service
+    # Create or update systemd service
     setup_systemd_service
     
-    echo -e "${BOLD}${GREEN}[+] WORM Miner installation completed successfully!${NC}"
+    echo -e "${BOLD}${GREEN}[+] WORM Miner configuration completed successfully!${NC}"
 }
 
 # Enhanced private key setup with address generation
@@ -295,7 +324,7 @@ setup_private_key() {
     while true; do
         echo -e "${YELLOW}Please enter your Ethereum private key:${NC}"
         echo -e "${DIM}Format: 0x followed by 64 hexadecimal characters${NC}"
-        read -sp "Private Key: " private_key
+        read -p "Private Key: " private_key
         echo ""
         
         if [[ $private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
@@ -999,14 +1028,44 @@ main_menu() {
     while true; do
         show_header
         
+        # Check installation and configuration status
+        local is_installed=$(check_miner_installed && echo "true" || echo "false")
+        local is_configured=$(check_miner_configured && echo "true" || echo "false")
+        
         echo -e "${GREEN}${BOLD}---- MAIN MENU ----${NC}"
-        echo "1.  🚀 Install Miner & Setup Service"
-        echo "2.  🔥 Burn ETH for BETH"
-        echo "3.  ⛏️  Participate in Mining"  
-        echo "4.  💰 Claim WORM Rewards"
-        echo "5.  📊 Check Balances & Info"
-        echo "6.  📝 View Miner Logs"
-        echo "7.  🔄 Update Miner"
+        
+        # Show status
+        if [[ "$is_installed" == "true" ]]; then
+            echo -e "${GREEN}✅ Miner: INSTALLED${NC}"
+        else
+            echo -e "${RED}❌ Miner: NOT INSTALLED${NC}"
+        fi
+        
+        if [[ "$is_configured" == "true" ]]; then
+            echo -e "${GREEN}✅ Config: CONFIGURED${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Config: NOT CONFIGURED${NC}"
+        fi
+        echo ""
+        
+        # Show appropriate options based on status
+        if [[ "$is_installed" == "false" ]]; then
+            echo "1.  🚀 Install Miner"
+        else
+            echo "1.  🔄 Update Miner"
+        fi
+        
+        if [[ "$is_installed" == "true" ]]; then
+            echo "2.  ⚙️  Setup/Configure Miner"
+        else
+            echo "2.  ⚙️  Setup/Configure Miner (Requires Installation)"
+        fi
+        
+        echo "3.  🔥 Burn ETH for BETH"
+        echo "4.  ⛏️  Participate in Mining"  
+        echo "5.  💰 Claim WORM Rewards"
+        echo "6.  📊 Check Balances & Info"
+        echo "7.  📝 View Miner Logs"
         echo "8.  🌐 Find & Set Fastest RPC"
         echo "9.  ⚙️  Advanced Options"
         echo "10. 🗑️  Uninstall Miner"
@@ -1016,25 +1075,33 @@ main_menu() {
         
         case $action in
             1)
-                install_miner
+                if [[ "$is_installed" == "false" ]]; then
+                    install_miner
+                else
+                    update_miner
+                fi
                 ;;
             2)
-                burn_eth_for_beth
+                if [[ "$is_installed" == "true" ]]; then
+                    setup_miner_config
+                else
+                    echo -e "${RED}Please install miner first (Option 1).${NC}"
+                fi
                 ;;
             3)
-                participate_mining
+                burn_eth_for_beth
                 ;;
             4)
-                claim_rewards
+                participate_mining
                 ;;
             5)
-                check_balances
+                claim_rewards
                 ;;
             6)
-                view_logs
+                check_balances
                 ;;
             7)
-                update_miner
+                view_logs
                 ;;
             8)
                 find_fastest_rpc
