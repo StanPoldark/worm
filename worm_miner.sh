@@ -631,14 +631,14 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command in if statement (same as single burn)
-        if "$WORM_MINER_BIN" burn \
+        # Execute burn command in subshell to isolate any side effects
+        if (cd "$MINER_DIR" && "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee"; then
+            --fee "$fee"); then
             
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
