@@ -639,6 +639,27 @@ execute_single_burn_with_restart() {
     
     # Execute burn in a way that allows restart
     cd "$MINER_DIR"
+    
+    # Create a background script that will restart us after burn completes
+    local restart_script="/tmp/phoenix_restart_$$_$current_burn.sh"
+    cat > "$restart_script" << EOF
+#!/bin/bash
+sleep 2
+if [[ -f "$BATCH_STATE_FILE" ]]; then
+    echo "[PHOENIX] Auto-restarting script..."
+    bash "$script_path" --continue-batch-burn
+else
+    echo "[PHOENIX] No state file found, batch burn may be complete."
+fi
+rm -f "$restart_script"
+EOF
+    chmod +x "$restart_script"
+    
+    # Start the restart script in background
+    nohup "$restart_script" > /dev/null 2>&1 &
+    local restart_pid=$!
+    
+    # Execute burn
     if "$WORM_MINER_BIN" burn \
         --network sepolia \
         --private-key "$private_key" \
@@ -646,6 +667,10 @@ execute_single_burn_with_restart() {
         --amount "$amount_per_burn" \
         --spend "$spend" \
         --fee "$fee"; then
+        
+        # If we reach here, kill the restart script since we can handle restart ourselves
+        kill $restart_pid 2>/dev/null
+        rm -f "$restart_script"
         
         # Burn successful - update state and continue or restart
         ((success_count++))
@@ -674,6 +699,10 @@ execute_single_burn_with_restart() {
             show_batch_summary "$success_count" "$failed_count" "$total_burns" "$amount_per_burn" "$private_key" "$fastest_rpc"
         fi
     else
+        # If we reach here, kill the restart script since we can handle restart ourselves
+        kill $restart_pid 2>/dev/null
+        rm -f "$restart_script"
+        
         # Burn failed
         ((failed_count++))
         echo -e "${RED}[-] Burn $current_burn failed, continuing with next burn...${NC}"
@@ -728,8 +757,14 @@ show_batch_summary() {
     echo -e "${CYAN}[PHOENIX] Batch burn process completed successfully${NC}"
 }
 
+# Function to clean up any leftover restart scripts
+cleanup_restart_scripts() {
+    rm -f /tmp/phoenix_restart_$$_*.sh 2>/dev/null
+}
+
 # Function to continue batch burn from saved state
 continue_batch_burn() {
+    cleanup_restart_scripts
     if ! load_batch_state; then
         echo -e "${RED}No batch burn state found. Cannot continue.${NC}"
         return 1
@@ -756,6 +791,7 @@ continue_batch_burn() {
 
 # Batch burn function with phoenix restart capability
 batch_burn_eth_for_beth() {
+    cleanup_restart_scripts
     echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH (PHOENIX MODE) ===${NC}"
     
     local private_key
@@ -833,7 +869,7 @@ batch_burn_eth_for_beth() {
     local failed_count=0
     
     # Start the first burn with phoenix restart capability
-    execute_single_burn_with_restart 1 "$burn_count" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
+    execute_single_burn_with_restart "1" "$burn_count" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
 }
 
 # Enhanced mining participation
