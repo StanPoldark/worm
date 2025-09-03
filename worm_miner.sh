@@ -547,8 +547,6 @@ burn_eth_for_beth() {
 
 # Batch burn function with loop support
 batch_burn_eth_for_beth() {
-    # Temporarily disable set -e to prevent script exit on command failures
-    set +e
     echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH ===${NC}"
     
     local private_key
@@ -631,14 +629,14 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command in subshell to isolate any side effects
-        if (cd "$MINER_DIR" && "$WORM_MINER_BIN" burn \
+        # Execute burn command (same as single burn)
+        if "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee"); then
+            --fee "$fee"; then
             
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
@@ -675,10 +673,6 @@ batch_burn_eth_for_beth() {
     fi
     
     log_info "Batch burn process completed: $success_count successful, $failed_count failed"
-    echo -e "${CYAN}[DEBUG] Batch burn function ending, re-enabling set -e${NC}"
-    
-    # Re-enable set -e
-    set -e
     echo -e "${CYAN}[DEBUG] Batch burn function completed successfully${NC}"
 }
 
