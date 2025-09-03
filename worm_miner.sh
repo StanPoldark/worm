@@ -626,17 +626,18 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command and capture exit status
-        set +e  # Temporarily disable exit on error
-        "$WORM_MINER_BIN" burn \
-            --network sepolia \
-            --private-key "$private_key" \
-            --custom-rpc "$fastest_rpc" \
-            --amount "$amount_per_burn" \
-            --spend "$spend" \
-            --fee "$fee"
-        local burn_exit_code=$?
-        set -e  # Re-enable exit on error
+        # Execute burn command in subshell to prevent script exit
+        local burn_exit_code
+        (
+            "$WORM_MINER_BIN" burn \
+                --network sepolia \
+                --private-key "$private_key" \
+                --custom-rpc "$fastest_rpc" \
+                --amount "$amount_per_burn" \
+                --spend "$spend" \
+                --fee "$fee"
+        )
+        burn_exit_code=$?
         
         if [[ $burn_exit_code -eq 0 ]]; then
             
