@@ -545,6 +545,8 @@ burn_eth_for_beth() {
 
 # Batch burn function with loop support
 batch_burn_eth_for_beth() {
+    # Temporarily disable set -e to prevent script exit on command failures
+    set +e
     echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH ===${NC}"
     
     local private_key
@@ -633,7 +635,7 @@ batch_burn_eth_for_beth() {
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee" 2>&1; then
+            --fee "$fee"; then
             
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
@@ -667,6 +669,9 @@ batch_burn_eth_for_beth() {
     fi
     
     log_info "Batch burn process completed: $success_count successful, $failed_count failed"
+    
+    # Re-enable set -e
+    set -e
 }
 
 # Enhanced mining participation
