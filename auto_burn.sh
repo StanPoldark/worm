@@ -12,7 +12,7 @@ DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # 配置
-MINER_DIR="$HOME/.worm-miner"
+MINER_DIR="$HOME/miner"
 WORM_MINER_BIN="$MINER_DIR/worm-miner"
 RPC_URL="https://sepolia.drpc.org"
 BURN_AMOUNT="1"
