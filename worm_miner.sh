@@ -651,17 +651,29 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command in a subshell to capture output and exit status
-        burn_output=$("$WORM_MINER_BIN" burn \
+        # Execute burn command in background to fully isolate it, with debug logging
+        local output_file=$(mktemp)
+        local pid
+        
+        echo -e "${CYAN}[DEBUG] Enabling RUST_LOG=debug and running burn in background...${NC}"
+        
+        (cd "$MINER_DIR" && RUST_LOG=debug "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee" 2>&1)
+            --fee "$fee") > "$output_file" 2>&1 &
+        
+        pid=$!
+        wait "$pid"
         local burn_status=$?
         
-        echo "$burn_output"
+        echo -e "${CYAN}[DEBUG] Burn process (PID: $pid) finished with status: $burn_status${NC}"
+        echo -e "${DIM}--- Burn Command Output Start ---${NC}"
+        cat "$output_file"
+        echo -e "${DIM}--- Burn Command Output End ---${NC}"
+        rm "$output_file"
         
         if [ $burn_status -eq 0 ]; then
             ((success_count++))
