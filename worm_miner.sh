@@ -626,25 +626,27 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        if "$WORM_MINER_BIN" burn \
+        # Execute burn command and capture exit status
+        set +e  # Temporarily disable exit on error
+        "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee"; then
+            --fee "$fee"
+        local burn_exit_code=$?
+        set -e  # Re-enable exit on error
+        
+        if [[ $burn_exit_code -eq 0 ]]; then
             
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
+            log_info "Batch burn $i/$burn_count successful"
         else
             ((failed_count++))
-            echo -e "${RED}[-] Burn $i failed${NC}"
-            
-            read -p "Continue with remaining burns? [y/N]: " continue_batch
-            if [[ ! "$continue_batch" =~ ^[yY]$ ]]; then
-                echo -e "${YELLOW}Batch burn stopped by user${NC}"
-                break
-            fi
+            echo -e "${RED}[-] Burn $i failed, continuing with next burn...${NC}"
+            log_error "Batch burn $i/$burn_count failed"
         fi
         
         # Add delay between burns (except for the last one)
