@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 
 # 配置
 MINER_DIR="$HOME/miner"
-WORM_MINER_BIN="$MINER_DIR/worm-miner"
+WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
 RPC_URL="https://sepolia.drpc.org"
 BURN_AMOUNT="1"
 SPEND_AMOUNT="0.999"
