@@ -626,19 +626,14 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command as separate process
-        # Note: worm_miner is designed to exit after each command execution
-        local burn_exit_code
-        "$WORM_MINER_BIN" burn \
+        # Execute burn command in if statement (same as single burn)
+        if "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee" 2>&1
-        burn_exit_code=$?
-        
-        if [[ $burn_exit_code -eq 0 ]]; then
+            --fee "$fee" 2>&1; then
             
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
