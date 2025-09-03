@@ -634,7 +634,8 @@ execute_single_burn_with_restart() {
     echo -e "${CYAN}[PHOENIX] Executing burn with auto-restart capability...${NC}"
     
     # Create a restart command that will be executed after burn
-    local restart_cmd="$0 --continue-batch-burn"
+    local script_path="$(realpath "$0")"
+    local restart_cmd="bash \"$script_path\" --continue-batch-burn"
     
     # Execute burn in a way that allows restart
     cd "$MINER_DIR"
@@ -664,7 +665,9 @@ execute_single_burn_with_restart() {
             
             # Phoenix restart - execute the script again to continue
             echo -e "${CYAN}[PHOENIX] Restarting script to continue batch burn...${NC}"
-            exec "$restart_cmd"
+            echo -e "${CYAN}[PHOENIX] Executing: bash \"$script_path\" --continue-batch-burn${NC}"
+            bash "$script_path" --continue-batch-burn
+            exit 0
         else
             # All burns completed
             rm -f "$BATCH_STATE_FILE"
@@ -687,7 +690,9 @@ execute_single_burn_with_restart() {
             
             # Phoenix restart
             echo -e "${CYAN}[PHOENIX] Restarting script to continue batch burn...${NC}"
-            exec "$restart_cmd"
+            echo -e "${CYAN}[PHOENIX] Executing: bash \"$script_path\" --continue-batch-burn${NC}"
+            bash "$script_path" --continue-batch-burn
+            exit 0
         else
             # All burns completed
             rm -f "$BATCH_STATE_FILE"
