@@ -560,7 +560,7 @@ batch_burn_eth_for_beth() {
     
     # Show current balance first
     echo -e "${CYAN}Current balances:${NC}"
-    "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+    "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
     echo ""
     
     # Get batch parameters
@@ -663,7 +663,7 @@ batch_burn_eth_for_beth() {
         
         # Show updated balance
         echo -e "${GREEN}Updated balances:${NC}"
-        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
     fi
     
     log_info "Batch burn process completed: $success_count successful, $failed_count failed"
