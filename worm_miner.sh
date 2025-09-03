@@ -536,7 +536,9 @@ burn_eth_for_beth() {
         
         # Show updated balance
         echo -e "${GREEN}Updated balances:${NC}"
+        echo -e "${CYAN}[DEBUG] About to execute info command...${NC}"
         "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
+        echo -e "${CYAN}[DEBUG] Info command completed${NC}"
     else
         log_error "Burn process failed"
         return 1
@@ -624,6 +626,7 @@ batch_burn_eth_for_beth() {
     
     for ((i=1; i<=burn_count; i++)); do
         echo -e "${CYAN}[*] Executing burn $i/$burn_count...${NC}"
+        echo -e "${CYAN}[DEBUG] Starting burn iteration $i${NC}"
         
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
@@ -640,6 +643,7 @@ batch_burn_eth_for_beth() {
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
             log_info "Batch burn $i/$burn_count successful"
+            echo -e "${CYAN}[DEBUG] Burn command completed, continuing to next iteration...${NC}"
         else
             ((failed_count++))
             echo -e "${RED}[-] Burn $i failed, continuing with next burn...${NC}"
@@ -651,7 +655,9 @@ batch_burn_eth_for_beth() {
             echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
             sleep "$delay_seconds"
         fi
+        echo -e "${CYAN}[DEBUG] Completed burn iteration $i${NC}"
     done
+    echo -e "${CYAN}[DEBUG] All burn iterations completed${NC}"
     
     # Summary
     echo -e "${BOLD}${GREEN}=== BATCH BURN SUMMARY ===${NC}"
@@ -669,9 +675,11 @@ batch_burn_eth_for_beth() {
     fi
     
     log_info "Batch burn process completed: $success_count successful, $failed_count failed"
+    echo -e "${CYAN}[DEBUG] Batch burn function ending, re-enabling set -e${NC}"
     
     # Re-enable set -e
     set -e
+    echo -e "${CYAN}[DEBUG] Batch burn function completed successfully${NC}"
 }
 
 # Enhanced mining participation
