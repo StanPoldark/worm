@@ -169,6 +169,28 @@ find_fastest_rpc() {
     fi
 }
 
+# Helper function to execute a single burn and handle its exit behavior
+_execute_burn() {
+    local private_key=$1
+    local fastest_rpc=$2
+    local amount_per_burn=$3
+    local spend=$4
+    local fee=$5
+
+    # Execute burn command in a subshell to isolate it completely
+    (
+        cd "$MINER_DIR" || exit 1
+        "$WORM_MINER_BIN" burn \
+            --network sepolia \
+            --private-key "$private_key" \
+            --custom-rpc "$fastest_rpc" \
+            --amount "$amount_per_burn" \
+            --spend "$spend" \
+            --fee "$fee"
+    )
+    return $?
+}
+
 # Enhanced dependency installation
 install_dependencies() {
     echo -e "${CYAN}[*] Installing system dependencies...${NC}"
@@ -629,15 +651,19 @@ batch_burn_eth_for_beth() {
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command (same as single burn)
-        if "$WORM_MINER_BIN" burn \
+        # Execute burn command in a subshell to capture output and exit status
+        burn_output=$("$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee"; then
-            
+            --fee "$fee" 2>&1)
+        local burn_status=$?
+        
+        echo "$burn_output"
+        
+        if [ $burn_status -eq 0 ]; then
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
             log_info "Batch burn $i/$burn_count successful"
