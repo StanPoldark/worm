@@ -536,7 +536,7 @@ burn_eth_for_beth() {
         
         # Show updated balance
         echo -e "${GREEN}Updated balances:${NC}"
-        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc"
+        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
     else
         log_error "Burn process failed"
         return 1
