@@ -567,9 +567,191 @@ burn_eth_for_beth() {
     fi
 }
 
-# Batch burn function with loop support
+# State file for batch burn progress
+BATCH_STATE_FILE="$CONFIG_DIR/batch_burn_state.json"
+
+# Function to save batch burn state
+save_batch_state() {
+    local current_burn=$1
+    local total_burns=$2
+    local amount_per_burn=$3
+    local spend_ratio=$4
+    local fee_ratio=$5
+    local delay_seconds=$6
+    local success_count=$7
+    local failed_count=$8
+    local private_key=$9
+    local fastest_rpc=${10}
+    
+    cat > "$BATCH_STATE_FILE" << EOF
+{
+    "current_burn": $current_burn,
+    "total_burns": $total_burns,
+    "amount_per_burn": "$amount_per_burn",
+    "spend_ratio": "$spend_ratio",
+    "fee_ratio": "$fee_ratio",
+    "delay_seconds": $delay_seconds,
+    "success_count": $success_count,
+    "failed_count": $failed_count,
+    "private_key": "$private_key",
+    "fastest_rpc": "$fastest_rpc",
+    "timestamp": $(date +%s)
+}
+EOF
+}
+
+# Function to load batch burn state
+load_batch_state() {
+    if [[ -f "$BATCH_STATE_FILE" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to execute a single burn with phoenix restart capability
+execute_single_burn_with_restart() {
+    local current_burn=$1
+    local total_burns=$2
+    local amount_per_burn=$3
+    local spend_ratio=$4
+    local fee_ratio=$5
+    local delay_seconds=$6
+    local success_count=$7
+    local failed_count=$8
+    local private_key=$9
+    local fastest_rpc=${10}
+    
+    echo -e "${CYAN}[*] Executing burn $current_burn/$total_burns...${NC}"
+    
+    local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
+    local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
+    
+    # Save state before burn (in case of crash)
+    save_batch_state "$current_burn" "$total_burns" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
+    
+    # Execute burn and immediately restart script to continue
+    echo -e "${CYAN}[PHOENIX] Executing burn with auto-restart capability...${NC}"
+    
+    # Create a restart command that will be executed after burn
+    local restart_cmd="$0 --continue-batch-burn"
+    
+    # Execute burn in a way that allows restart
+    cd "$MINER_DIR"
+    if "$WORM_MINER_BIN" burn \
+        --network sepolia \
+        --private-key "$private_key" \
+        --custom-rpc "$fastest_rpc" \
+        --amount "$amount_per_burn" \
+        --spend "$spend" \
+        --fee "$fee"; then
+        
+        # Burn successful - update state and continue or restart
+        ((success_count++))
+        echo -e "${GREEN}[+] Burn $current_burn completed successfully${NC}"
+        log_info "Batch burn $current_burn/$total_burns successful"
+        
+        # Update state with success
+        local next_burn=$((current_burn + 1))
+        if [[ $next_burn -le $total_burns ]]; then
+            save_batch_state "$next_burn" "$total_burns" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
+            
+            # Add delay before restart
+            if [[ $current_burn -lt $total_burns ]]; then
+                echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
+                sleep "$delay_seconds"
+            fi
+            
+            # Phoenix restart - execute the script again to continue
+            echo -e "${CYAN}[PHOENIX] Restarting script to continue batch burn...${NC}"
+            exec "$restart_cmd"
+        else
+            # All burns completed
+            rm -f "$BATCH_STATE_FILE"
+            show_batch_summary "$success_count" "$failed_count" "$total_burns" "$amount_per_burn" "$private_key" "$fastest_rpc"
+        fi
+    else
+        # Burn failed
+        ((failed_count++))
+        echo -e "${RED}[-] Burn $current_burn failed, continuing with next burn...${NC}"
+        log_error "Batch burn $current_burn/$total_burns failed"
+        
+        # Update state with failure and continue
+        local next_burn=$((current_burn + 1))
+        if [[ $next_burn -le $total_burns ]]; then
+            save_batch_state "$next_burn" "$total_burns" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
+            
+            # Add delay before restart
+            echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
+            sleep "$delay_seconds"
+            
+            # Phoenix restart
+            echo -e "${CYAN}[PHOENIX] Restarting script to continue batch burn...${NC}"
+            exec "$restart_cmd"
+        else
+            # All burns completed
+            rm -f "$BATCH_STATE_FILE"
+            show_batch_summary "$success_count" "$failed_count" "$total_burns" "$amount_per_burn" "$private_key" "$fastest_rpc"
+        fi
+    fi
+}
+
+# Function to show batch summary
+show_batch_summary() {
+    local success_count=$1
+    local failed_count=$2
+    local total_burns=$3
+    local amount_per_burn=$4
+    local private_key=$5
+    local fastest_rpc=$6
+    
+    echo -e "${BOLD}${GREEN}=== BATCH BURN SUMMARY ===${NC}"
+    echo -e "  Successful burns: ${GREEN}$success_count${NC}"
+    echo -e "  Failed burns: ${RED}$failed_count${NC}"
+    echo -e "  Total burns attempted: $((success_count + failed_count))${NC}"
+    
+    if [[ $success_count -gt 0 ]]; then
+        local total_burned=$(echo "scale=6; $success_count * $amount_per_burn" | bc)
+        echo -e "  Total ETH burned: ${BOLD}$total_burned ETH${NC}"
+        
+        # Show updated balance
+        echo -e "${GREEN}Updated balances:${NC}"
+        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
+    fi
+    
+    log_info "Batch burn process completed: $success_count successful, $failed_count failed"
+    echo -e "${CYAN}[PHOENIX] Batch burn process completed successfully${NC}"
+}
+
+# Function to continue batch burn from saved state
+continue_batch_burn() {
+    if ! load_batch_state; then
+        echo -e "${RED}No batch burn state found. Cannot continue.${NC}"
+        return 1
+    fi
+    
+    # Parse state file
+    local current_burn=$(grep '"current_burn"' "$BATCH_STATE_FILE" | cut -d':' -f2 | tr -d ' ,')
+    local total_burns=$(grep '"total_burns"' "$BATCH_STATE_FILE" | cut -d':' -f2 | tr -d ' ,')
+    local amount_per_burn=$(grep '"amount_per_burn"' "$BATCH_STATE_FILE" | cut -d'"' -f4)
+    local spend_ratio=$(grep '"spend_ratio"' "$BATCH_STATE_FILE" | cut -d'"' -f4)
+    local fee_ratio=$(grep '"fee_ratio"' "$BATCH_STATE_FILE" | cut -d'"' -f4)
+    local delay_seconds=$(grep '"delay_seconds"' "$BATCH_STATE_FILE" | cut -d':' -f2 | tr -d ' ,')
+    local success_count=$(grep '"success_count"' "$BATCH_STATE_FILE" | cut -d':' -f2 | tr -d ' ,')
+    local failed_count=$(grep '"failed_count"' "$BATCH_STATE_FILE" | cut -d':' -f2 | tr -d ' ,')
+    local private_key=$(grep '"private_key"' "$BATCH_STATE_FILE" | cut -d'"' -f4)
+    local fastest_rpc=$(grep '"fastest_rpc"' "$BATCH_STATE_FILE" | cut -d'"' -f4)
+    
+    echo -e "${CYAN}[PHOENIX] Resuming batch burn from burn $current_burn/$total_burns${NC}"
+    echo -e "${CYAN}[PHOENIX] Progress: $success_count successful, $failed_count failed${NC}"
+    
+    # Continue with the current burn
+    execute_single_burn_with_restart "$current_burn" "$total_burns" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
+}
+
+# Batch burn function with phoenix restart capability
 batch_burn_eth_for_beth() {
-    echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH ===${NC}"
+    echo -e "${BOLD}${PURPLE}=== BATCH BURN ETH FOR BETH (PHOENIX MODE) ===${NC}"
     
     local private_key
     private_key=$(get_private_key) || return 1
@@ -623,13 +805,14 @@ batch_burn_eth_for_beth() {
     [[ -z "$delay_seconds" ]] && delay_seconds="5"
     
     # Confirmation
-    echo -e "${YELLOW}${BOLD}BATCH BURN CONFIRMATION:${NC}"
+    echo -e "${YELLOW}${BOLD}BATCH BURN CONFIRMATION (PHOENIX MODE):${NC}"
     echo -e "  Amount per burn: ${BOLD}$amount_per_burn ETH${NC}"
     echo -e "  Number of burns: ${BOLD}$burn_count${NC}"
     echo -e "  Total ETH needed: ${BOLD}$total_amount ETH${NC}"
     echo -e "  Spend ratio: ${BOLD}$spend_ratio${NC} (Fee ratio: $fee_ratio)"
     echo -e "  Delay between burns: ${BOLD}$delay_seconds seconds${NC}"
     echo -e "  Using RPC: ${DIM}$fastest_rpc${NC}"
+    echo -e "  ${CYAN}Phoenix Mode: Script will auto-restart after each burn${NC}"
     echo ""
     read -p "Proceed with batch burn? [y/N]: " confirm
     
@@ -638,80 +821,14 @@ batch_burn_eth_for_beth() {
         return 0
     fi
     
-    echo -e "${GREEN}[*] Starting batch burn process...${NC}"
-    cd "$MINER_DIR"
+    echo -e "${GREEN}[*] Starting batch burn process with Phoenix Mode...${NC}"
     
+    # Initialize counters and start first burn
     local success_count=0
     local failed_count=0
     
-    for ((i=1; i<=burn_count; i++)); do
-        echo -e "${CYAN}[*] Executing burn $i/$burn_count...${NC}"
-        echo -e "${CYAN}[DEBUG] Starting burn iteration $i${NC}"
-        
-        local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
-        local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
-        
-        # Execute burn command in background to fully isolate it, with debug logging
-        local output_file=$(mktemp)
-        local pid
-        
-        echo -e "${CYAN}[DEBUG] Enabling RUST_LOG=debug and running burn in background...${NC}"
-        
-        (cd "$MINER_DIR" && RUST_LOG=debug "$WORM_MINER_BIN" burn \
-            --network sepolia \
-            --private-key "$private_key" \
-            --custom-rpc "$fastest_rpc" \
-            --amount "$amount_per_burn" \
-            --spend "$spend" \
-            --fee "$fee") > "$output_file" 2>&1 &
-        
-        pid=$!
-        wait "$pid"
-        local burn_status=$?
-        
-        echo -e "${CYAN}[DEBUG] Burn process (PID: $pid) finished with status: $burn_status${NC}"
-        echo -e "${DIM}--- Burn Command Output Start ---${NC}"
-        cat "$output_file"
-        echo -e "${DIM}--- Burn Command Output End ---${NC}"
-        rm "$output_file"
-        
-        if [ $burn_status -eq 0 ]; then
-            ((success_count++))
-            echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
-            log_info "Batch burn $i/$burn_count successful"
-            echo -e "${CYAN}[DEBUG] Burn command completed, continuing to next iteration...${NC}"
-        else
-            ((failed_count++))
-            echo -e "${RED}[-] Burn $i failed, continuing with next burn...${NC}"
-            log_error "Batch burn $i/$burn_count failed"
-        fi
-        
-        # Add delay between burns (except for the last one)
-        if [[ $i -lt $burn_count ]]; then
-            echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
-            sleep "$delay_seconds"
-        fi
-        echo -e "${CYAN}[DEBUG] Completed burn iteration $i${NC}"
-    done
-    echo -e "${CYAN}[DEBUG] All burn iterations completed${NC}"
-    
-    # Summary
-    echo -e "${BOLD}${GREEN}=== BATCH BURN SUMMARY ===${NC}"
-    echo -e "  Successful burns: ${GREEN}$success_count${NC}"
-    echo -e "  Failed burns: ${RED}$failed_count${NC}"
-    echo -e "  Total burns attempted: $((success_count + failed_count))${NC}"
-    
-    if [[ $success_count -gt 0 ]]; then
-        local total_burned=$(echo "scale=6; $success_count * $amount_per_burn" | bc)
-        echo -e "  Total ETH burned: ${BOLD}$total_burned ETH${NC}"
-        
-        # Show updated balance
-        echo -e "${GREEN}Updated balances:${NC}"
-        "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>&1 || true
-    fi
-    
-    log_info "Batch burn process completed: $success_count successful, $failed_count failed"
-    echo -e "${CYAN}[DEBUG] Batch burn function completed successfully${NC}"
+    # Start the first burn with phoenix restart capability
+    execute_single_burn_with_restart 1 "$burn_count" "$amount_per_burn" "$spend_ratio" "$fee_ratio" "$delay_seconds" "$success_count" "$failed_count" "$private_key" "$fastest_rpc"
 }
 
 # Enhanced mining participation
@@ -1328,6 +1445,13 @@ trap cleanup SIGINT SIGTERM
 main() {
     # Initialize environment
     initialize
+    
+    # Check for command line arguments
+    if [[ "$1" == "--continue-batch-burn" ]]; then
+        echo -e "${CYAN}[PHOENIX] Continuing batch burn process...${NC}"
+        continue_batch_burn
+        return $?
+    fi
     
     # Check for required tools
     if ! command -v bc &>/dev/null; then
