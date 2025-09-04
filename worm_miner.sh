@@ -191,6 +191,128 @@ _execute_burn() {
     return $?
 }
 
+# Simple loop burn function - just loops the burn command without extra logic
+simple_loop_burn() {
+    echo -e "${BOLD}${PURPLE}=== SIMPLE LOOP BURN ===${NC}"
+    
+    local private_key
+    private_key=$(get_private_key) || return 1
+    
+    local fastest_rpc
+    if [[ -f "$RPC_FILE" ]]; then
+        fastest_rpc=$(cat "$RPC_FILE")
+    else
+        find_fastest_rpc
+        fastest_rpc=$(cat "$RPC_FILE")
+    fi
+    
+    # Get burn parameters
+    local amount spend fee
+    while true; do
+        read -p "Enter total ETH amount to burn (e.g., 1.0): " amount
+        if [[ $amount =~ ^[0-9]+\.?[0-9]*$ ]] && (( $(echo "$amount > 0" | bc -l) )); then
+            break
+        else
+            echo -e "${RED}Please enter a valid positive number${NC}"
+        fi
+    done
+    
+    # Suggest optimal spend amount (99.9% of burn amount)
+    local suggested_spend=$(echo "scale=6; $amount * 0.999" | bc)
+    read -p "Enter amount to mint as BETH (suggested: $suggested_spend): " spend
+    [[ -z "$spend" ]] && spend="$suggested_spend"
+    
+    local suggested_fee=$(echo "scale=6; $amount - $spend" | bc)
+    read -p "Enter fee amount (suggested: $suggested_fee): " fee
+    [[ -z "$fee" ]] && fee="$suggested_fee"
+    
+    # Get delay between burns
+    local delay_seconds
+    read -p "Enter delay between burns in seconds (default 5): " delay_seconds
+    [[ -z "$delay_seconds" ]] && delay_seconds="7"
+    
+    # Get loop count or infinite
+    local loop_count
+    local infinite=false
+    read -p "Run in infinite loop? [y/N]: " infinite_choice
+    if [[ "$infinite_choice" =~ ^[yY]$ ]]; then
+        infinite=true
+        loop_count=999999 # 设置一个很大的数字
+        echo -e "${YELLOW}[!] Running in infinite loop mode. Press Ctrl+C to stop.${NC}"
+    else
+        while true; do
+            read -p "Enter number of burns to execute: " loop_count
+            if [[ $loop_count =~ ^[0-9]+$ ]] && [[ $loop_count -gt 0 ]]; then
+                break
+            else
+                echo -e "${RED}Please enter a valid positive integer${NC}"
+            fi
+        done
+    fi
+    
+    # Confirmation
+    echo -e "${YELLOW}${BOLD}SIMPLE LOOP BURN CONFIRMATION:${NC}"
+    echo -e "  Burn Amount: ${BOLD}$amount ETH${NC}"
+    echo -e "  BETH to mint: ${BOLD}$spend BETH${NC}"
+    echo -e "  Fee: ${BOLD}$fee ETH${NC}"
+    if [[ "$infinite" == "true" ]]; then
+        echo -e "  Mode: ${BOLD}Infinite loop${NC} (Press Ctrl+C to stop)"
+    else
+        echo -e "  Number of burns: ${BOLD}$loop_count${NC}"
+    fi
+    echo -e "  Delay between burns: ${BOLD}$delay_seconds seconds${NC}"
+    echo -e "  Using RPC: ${DIM}$fastest_rpc${NC}"
+    echo ""
+    read -p "Proceed with loop burn? [y/N]: " confirm
+    
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+        log_info "Loop burn cancelled by user"
+        return 0
+    fi
+    
+    echo -e "${GREEN}[*] Starting loop burn process...${NC}"
+    cd "$MINER_DIR"
+    
+    local count=1
+    local success=0
+    local failed=0
+    
+    while [[ $count -le $loop_count ]]; do
+        echo -e "${CYAN}[*] Executing burn $count...${NC}"
+        
+        # 直接执行burn命令
+        "$WORM_MINER_BIN" burn \
+            --network sepolia \
+            --private-key "$private_key" \
+            --custom-rpc "$fastest_rpc" \
+            --amount "$amount" \
+            --spend "$spend" \
+            --fee "$fee"
+        
+        if [ $? -eq 0 ]; then
+            ((success++))
+            echo -e "${GREEN}[+] Burn $count completed successfully${NC}"
+        else
+            ((failed++))
+            echo -e "${RED}[-] Burn $count failed${NC}"
+        fi
+        
+        echo -e "${BOLD}Stats: ${GREEN}$success successful${NC}, ${RED}$failed failed${NC}"
+        
+        if [[ $count -lt $loop_count ]]; then
+            echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
+            sleep "$delay_seconds"
+        fi
+        
+        ((count++))
+    done
+    
+    echo -e "${BOLD}${GREEN}=== LOOP BURN COMPLETED ===${NC}"
+    echo -e "  Successful burns: ${GREEN}$success${NC}"
+    echo -e "  Failed burns: ${RED}$failed${NC}"
+    echo -e "  Total burns attempted: $((success + failed))${NC}"
+}
+
 # Enhanced dependency installation
 install_dependencies() {
     echo -e "${CYAN}[*] Installing system dependencies...${NC}"
@@ -598,16 +720,24 @@ batch_burn_eth_for_beth() {
         fi
     done
     
-    while true; do
-        read -p "Enter number of burns to execute: " burn_count
-        if [[ $burn_count =~ ^[0-9]+$ ]] && [[ $burn_count -gt 0 ]]; then
-            break
-        else
-            echo -e "${RED}Please enter a valid positive integer${NC}"
-        fi
-    done
-    
-    total_amount=$(echo "scale=6; $amount_per_burn * $burn_count" | bc)
+    # 选择是否无限循环
+    local infinite_loop=false
+    read -p "Run in infinite loop? [y/N]: " infinite_choice
+    if [[ "$infinite_choice" =~ ^[yY]$ ]]; then
+        infinite_loop=true
+        burn_count=999999 # 设置一个很大的数字
+        echo -e "${YELLOW}[!] Running in infinite loop mode. Press Ctrl+C to stop.${NC}"
+    else
+        while true; do
+            read -p "Enter number of burns to execute: " burn_count
+            if [[ $burn_count =~ ^[0-9]+$ ]] && [[ $burn_count -gt 0 ]]; then
+                break
+            else
+                echo -e "${RED}Please enter a valid positive integer${NC}"
+            fi
+        done
+        total_amount=$(echo "scale=6; $amount_per_burn * $burn_count" | bc)
+    fi
     
     # Get spend and fee ratios
     local spend_ratio fee_ratio
@@ -625,8 +755,12 @@ batch_burn_eth_for_beth() {
     # Confirmation
     echo -e "${YELLOW}${BOLD}BATCH BURN CONFIRMATION:${NC}"
     echo -e "  Amount per burn: ${BOLD}$amount_per_burn ETH${NC}"
-    echo -e "  Number of burns: ${BOLD}$burn_count${NC}"
-    echo -e "  Total ETH needed: ${BOLD}$total_amount ETH${NC}"
+    if [[ "$infinite_loop" == "true" ]]; then
+        echo -e "  Mode: ${BOLD}Infinite loop${NC} (Press Ctrl+C to stop)"
+    else
+        echo -e "  Number of burns: ${BOLD}$burn_count${NC}"
+        echo -e "  Total ETH needed: ${BOLD}$total_amount ETH${NC}"
+    fi
     echo -e "  Spend ratio: ${BOLD}$spend_ratio${NC} (Fee ratio: $fee_ratio)"
     echo -e "  Delay between burns: ${BOLD}$delay_seconds seconds${NC}"
     echo -e "  Using RPC: ${DIM}$fastest_rpc${NC}"
@@ -643,45 +777,50 @@ batch_burn_eth_for_beth() {
     
     local success_count=0
     local failed_count=0
+    local i=1
     
-    for ((i=1; i<=burn_count; i++)); do
-        echo -e "${CYAN}[*] Executing burn $i/$burn_count...${NC}"
-        echo -e "${CYAN}[DEBUG] Starting burn iteration $i${NC}"
+    # 使用while循环代替for循环，以支持无限循环
+    while [[ $i -le $burn_count ]]; do
+        echo -e "${CYAN}[*] Executing burn $i...${NC}"
+        if [[ "$infinite_loop" != "true" ]]; then
+            echo -e "${CYAN}[*] Progress: $i/$burn_count${NC}"
+        fi
         
         local spend=$(echo "scale=6; $amount_per_burn * $spend_ratio" | bc)
         local fee=$(echo "scale=6; $amount_per_burn * $fee_ratio" | bc)
         
-        # Execute burn command in a subshell to capture output and exit status
-        burn_output=$("$WORM_MINER_BIN" burn \
+        # 直接执行burn命令，不捕获输出
+        "$WORM_MINER_BIN" burn \
             --network sepolia \
             --private-key "$private_key" \
             --custom-rpc "$fastest_rpc" \
             --amount "$amount_per_burn" \
             --spend "$spend" \
-            --fee "$fee" 2>&1)
-        local burn_status=$?
+            --fee "$fee"
         
-        echo "$burn_output"
+        local burn_status=$?
         
         if [ $burn_status -eq 0 ]; then
             ((success_count++))
             echo -e "${GREEN}[+] Burn $i completed successfully${NC}"
-            log_info "Batch burn $i/$burn_count successful"
-            echo -e "${CYAN}[DEBUG] Burn command completed, continuing to next iteration...${NC}"
+            log_info "Batch burn $i successful"
         else
             ((failed_count++))
             echo -e "${RED}[-] Burn $i failed, continuing with next burn...${NC}"
-            log_error "Batch burn $i/$burn_count failed"
+            log_error "Batch burn $i failed"
         fi
         
-        # Add delay between burns (except for the last one)
+        # 显示当前统计
+        echo -e "${BOLD}Current stats: ${GREEN}$success_count successful${NC}, ${RED}$failed_count failed${NC}"
+        
+        # 添加延迟
         if [[ $i -lt $burn_count ]]; then
             echo -e "${DIM}Waiting $delay_seconds seconds before next burn...${NC}"
             sleep "$delay_seconds"
         fi
-        echo -e "${CYAN}[DEBUG] Completed burn iteration $i${NC}"
+        
+        ((i++))
     done
-    echo -e "${CYAN}[DEBUG] All burn iterations completed${NC}"
     
     # Summary
     echo -e "${BOLD}${GREEN}=== BATCH BURN SUMMARY ===${NC}"
@@ -1222,16 +1361,17 @@ main_menu() {
         
         echo "3.  🔥 Burn ETH for BETH"
         echo "4.  🔥🔄 Batch Burn ETH (Loop)"
-        echo "5.  ⛏️  Participate in Mining"  
-        echo "6.  💰 Claim WORM Rewards"
-        echo "7.  📊 Check Balances & Info"
-        echo "8.  📝 View Miner Logs"
-        echo "9.  🌐 Find & Set Fastest RPC"
-        echo "10. ⚙️  Advanced Options"
-        echo "11. 🗑️  Uninstall Miner"
-        echo "12. ❌ Exit"
+        echo "5.  🔄 Simple Loop Burn (直接循环)"
+        echo "6.  ⛏️  Participate in Mining"  
+        echo "7.  💰 Claim WORM Rewards"
+        echo "8.  📊 Check Balances & Info"
+        echo "9.  📝 View Miner Logs"
+        echo "10. 🌐 Find & Set Fastest RPC"
+        echo "11. ⚙️  Advanced Options"
+        echo "12. 🗑️  Uninstall Miner"
+        echo "13. ❌ Exit"
         echo -e "${GREEN}-------------------${NC}"
-        read -p "Enter choice [1-12]: " action
+        read -p "Enter choice [1-13]: " action
         
         case $action in
             1)
@@ -1255,32 +1395,35 @@ main_menu() {
                 batch_burn_eth_for_beth
                 ;;
             5)
-                participate_mining
+                simple_loop_burn
                 ;;
             6)
-                claim_rewards
+                participate_mining
                 ;;
             7)
-                check_balances
+                claim_rewards
                 ;;
             8)
-                view_logs
+                check_balances
                 ;;
             9)
-                find_fastest_rpc
+                view_logs
                 ;;
             10)
-                advanced_mining_menu
+                find_fastest_rpc
                 ;;
             11)
-                uninstall_miner
+                advanced_mining_menu
                 ;;
             12)
+                uninstall_miner
+                ;;
+            13)
                 echo -e "${GREEN}[*] Thank you for using WORM Miner! Goodbye!${NC}"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}Invalid choice. Please enter a number from 1 to 12.${NC}"
+                echo -e "${RED}Invalid choice. Please enter a number from 1 to 13.${NC}"
                 ;;
         esac
         
