@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# 导入原始脚本中的函数
+source "$(dirname "$0")/worm_miner.sh"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -12,16 +15,13 @@ DIM='\033[2m'
 NC='\033[0m' # No Color
 
 # 配置
-MINER_DIR="$HOME/miner"
-WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
-RPC_URL="https://sepolia.drpc.org"
+BURN_COUNT=10
 BURN_AMOUNT="1"
 SPEND_AMOUNT="0.999"
 FEE_AMOUNT="0.001"
-BURN_COUNT=10
 DELAY_SECONDS=3
 
-echo -e "${BOLD}${PURPLE}=== 自动燃烧脚本 ===${NC}"
+echo -e "${BOLD}${PURPLE}=== 自动循环燃烧脚本 ===${NC}"
 echo -e "${CYAN}配置信息:${NC}"
 echo -e "  燃烧次数: ${BOLD}$BURN_COUNT${NC}"
 echo -e "  每次燃烧: ${BOLD}$BURN_AMOUNT ETH${NC}"
@@ -30,24 +30,22 @@ echo -e "  Fee: ${BOLD}$FEE_AMOUNT ETH${NC}"
 echo -e "  间隔时间: ${BOLD}$DELAY_SECONDS 秒${NC}"
 echo ""
 
-# 检查worm-miner是否存在
-if [[ ! -f "$WORM_MINER_BIN" ]]; then
-    echo -e "${RED}错误: 未找到 worm-miner 程序${NC}"
-    echo -e "${YELLOW}请确保已安装 worm-miner 到 $MINER_DIR${NC}"
-    exit 1
-fi
-
 # 获取私钥
-read -p "请输入私钥: " private_key
-if [[ -z "$private_key" ]]; then
-    echo -e "${RED}错误: 私钥不能为空${NC}"
-    exit 1
+private_key=$(get_private_key) || exit 1
+
+# 获取最快的RPC
+if [[ -f "$RPC_FILE" ]]; then
+    fastest_rpc=$(cat "$RPC_FILE")
+else
+    find_fastest_rpc
+    fastest_rpc=$(cat "$RPC_FILE")
 fi
 
 echo ""
 echo -e "${YELLOW}${BOLD}确认信息:${NC}"
 echo -e "  将执行 ${BOLD}$BURN_COUNT${NC} 次燃烧操作"
 echo -e "  总共需要 ${BOLD}$(echo "scale=3; $BURN_COUNT * $BURN_AMOUNT" | bc) ETH${NC}"
+echo -e "  使用RPC: ${DIM}$fastest_rpc${NC}"
 echo ""
 read -p "确认开始自动燃烧? [y/N]: " confirm
 
@@ -60,15 +58,9 @@ echo ""
 echo -e "${GREEN}[*] 开始自动燃烧流程...${NC}"
 echo ""
 
-# 切换到矿工目录
-cd "$MINER_DIR" || {
-    echo -e "${RED}错误: 无法切换到目录 $MINER_DIR${NC}"
-    exit 1
-}
-
 # 显示初始余额
 echo -e "${CYAN}当前余额:${NC}"
-"$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$RPC_URL" 2>/dev/null || true
+"$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>/dev/null || true
 echo ""
 
 # 执行燃烧循环
@@ -79,10 +71,11 @@ for ((i=1; i<=BURN_COUNT; i++)); do
     echo -e "${CYAN}[*] 执行第 $i/$BURN_COUNT 次燃烧...${NC}"
     
     # 执行燃烧命令
+    cd "$MINER_DIR"
     if "$WORM_MINER_BIN" burn \
         --network sepolia \
         --private-key "$private_key" \
-        --custom-rpc "$RPC_URL" \
+        --custom-rpc "$fastest_rpc" \
         --amount "$BURN_AMOUNT" \
         --spend "$SPEND_AMOUNT" \
         --fee "$FEE_AMOUNT"; then
@@ -109,12 +102,12 @@ echo -e "  失败燃烧: ${RED}$failed_count${NC}"
 echo -e "  总计尝试: $((success_count + failed_count))${NC}"
 
 if [[ $success_count -gt 0 ]]; then
-    local total_burned=$(echo "scale=6; $success_count * $BURN_AMOUNT" | bc)
+    total_burned=$(echo "scale=6; $success_count * $BURN_AMOUNT" | bc)
     echo -e "  总燃烧量: ${BOLD}$total_burned ETH${NC}"
     
     echo ""
     echo -e "${GREEN}更新后的余额:${NC}"
-    "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$RPC_URL" 2>/dev/null || true
+    "$WORM_MINER_BIN" info --network sepolia --private-key "$private_key" --custom-rpc "$fastest_rpc" 2>/dev/null || true
 fi
 
 echo ""
