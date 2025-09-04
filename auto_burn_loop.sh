@@ -5,25 +5,25 @@ set -o pipefail
 # 不再导入外部脚本，直接在本脚本中实现所需功能
 
 # 配置路径
-CONFIG_DIR="$HOME/.worm-miner"
+CONFIG_DIR="$HOME/.worm_miner"
 MINER_DIR="$HOME/miner"
 LOG_FILE="$CONFIG_DIR/miner.log"
 KEY_FILE="$CONFIG_DIR/private.key"
 RPC_FILE="$CONFIG_DIR/fastest_rpc.log"
 BACKUP_DIR="$CONFIG_DIR/backups"
 
-# 尝试多个可能的worm-miner路径
-if [[ -f "$HOME/.cargo/bin/worm-miner" ]]; then
-    WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
-elif [[ -f "$CONFIG_DIR/worm-miner" ]]; then
-    WORM_MINER_BIN="$CONFIG_DIR/worm-miner"
-elif [[ -f "$MINER_DIR/worm-miner" ]]; then
-    WORM_MINER_BIN="$MINER_DIR/worm-miner"
-elif [[ -f "$MINER_DIR/target/release/worm-miner" ]]; then
-    WORM_MINER_BIN="$MINER_DIR/target/release/worm-miner"
+# 尝试多个可能的worm_miner路径
+if [[ -f "$HOME/.cargo/bin/worm_miner" ]]; then
+    WORM_MINER_BIN="$HOME/.cargo/bin/worm_miner"
+elif [[ -f "$CONFIG_DIR/worm_miner" ]]; then
+    WORM_MINER_BIN="$CONFIG_DIR/worm_miner"
+elif [[ -f "$MINER_DIR/worm_miner" ]]; then
+    WORM_MINER_BIN="$MINER_DIR/worm_miner"
+elif [[ -f "$MINER_DIR/target/release/worm_miner" ]]; then
+    WORM_MINER_BIN="$MINER_DIR/target/release/worm_miner"
 else
     # 如果找不到，使用默认路径，后续会检查
-    WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
+    WORM_MINER_BIN="$HOME/.cargo/bin/worm_miner"
 fi
 
 # Enhanced Sepolia RPC list
