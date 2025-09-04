@@ -4,6 +4,13 @@ set -o pipefail
 
 # 不再导入外部脚本，直接在本脚本中实现所需功能
 
+# 使用说明：
+# 1. 正常运行: ./auto_burn_loop.sh
+# 2. 调试模式: ./auto_burn_loop.sh --debug
+# 3. 手动确认模式: ./auto_burn_loop.sh --manual
+# 4. 查看帮助: ./auto_burn_loop.sh --help
+# 5. 自定义参数: ./auto_burn_loop.sh --count 5 --amount 0.5 --delay 5
+
 # 配置路径
 CONFIG_DIR="$HOME/.worm_miner"
 MINER_DIR="$HOME/miner"
@@ -54,6 +61,7 @@ SPEND_AMOUNT="0.999"
 FEE_AMOUNT="0.001"
 DELAY_SECONDS=3
 AUTO_CONFIRM=true  # 设置为true自动确认所有提示，false则需要手动确认
+DEBUG=true  # 设置为true输出调试信息
 
 # 日志函数
 log_info() {
@@ -164,7 +172,77 @@ if [[ ! -d "$CONFIG_DIR" ]]; then
     log_info "创建配置目录: $CONFIG_DIR"
 fi
 
+# 处理命令行参数
+if [[ $# -gt 0 ]]; then
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] 接收到命令行参数: $@${NC}"
+    fi
+    
+    # 解析命令行参数
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --count|-c)
+                BURN_COUNT="$2"
+                shift 2
+                ;;
+            --amount|-a)
+                BURN_AMOUNT="$2"
+                shift 2
+                ;;
+            --spend|-s)
+                SPEND_AMOUNT="$2"
+                shift 2
+                ;;
+            --fee|-f)
+                FEE_AMOUNT="$2"
+                shift 2
+                ;;
+            --delay|-d)
+                DELAY_SECONDS="$2"
+                shift 2
+                ;;
+            --manual)
+                AUTO_CONFIRM=false
+                shift
+                ;;
+            --debug)
+                DEBUG=true
+                shift
+                ;;
+            --help|-h)
+                echo -e "${BOLD}使用方法:${NC}"
+                echo -e "  $0 [选项]"
+                echo -e "\n${BOLD}选项:${NC}"
+                echo -e "  --count, -c NUMBER    设置燃烧次数 (默认: $BURN_COUNT)"
+                echo -e "  --amount, -a NUMBER   设置每次燃烧金额 (默认: $BURN_AMOUNT ETH)"
+                echo -e "  --spend, -s NUMBER    设置spend金额 (默认: $SPEND_AMOUNT ETH)"
+                echo -e "  --fee, -f NUMBER      设置fee金额 (默认: $FEE_AMOUNT ETH)"
+                echo -e "  --delay, -d SECONDS   设置燃烧间隔时间 (默认: $DELAY_SECONDS 秒)"
+                echo -e "  --manual              启用手动确认模式"
+                echo -e "  --debug               启用调试模式"
+                echo -e "  --help, -h            显示此帮助信息"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}未知参数: $1${NC}"
+                echo -e "使用 $0 --help 查看帮助信息"
+                exit 1
+                ;;
+        esac
+    done
+fi
+
 # 检查worm-miner程序
+if [[ "$DEBUG" == "true" ]]; then
+    echo -e "${YELLOW}[DEBUG] 检查worm-miner程序: $WORM_MINER_BIN${NC}"
+    echo -e "${YELLOW}[DEBUG] 当前工作目录: $(pwd)${NC}"
+    echo -e "${YELLOW}[DEBUG] 脚本路径: $0${NC}"
+    echo -e "${YELLOW}[DEBUG] 配置目录: $CONFIG_DIR${NC}"
+    echo -e "${YELLOW}[DEBUG] 私钥文件: $KEY_FILE${NC}"
+    echo -e "${YELLOW}[DEBUG] RPC文件: $RPC_FILE${NC}"
+    ls -la "$WORM_MINER_BIN" 2>/dev/null || echo -e "${YELLOW}[DEBUG] worm-miner程序不存在${NC}"
+fi
+
 check_worm_miner || exit 1
 
 echo -e "${BOLD}${PURPLE}=== 自动循环燃烧脚本 ===${NC}"
@@ -175,12 +253,28 @@ echo -e "  Spend: ${BOLD}$SPEND_AMOUNT ETH${NC}"
 echo -e "  Fee: ${BOLD}$FEE_AMOUNT ETH${NC}"
 echo -e "  间隔时间: ${BOLD}$DELAY_SECONDS 秒${NC}"
 echo -e "  使用程序: ${DIM}$WORM_MINER_BIN${NC}"
+echo -e "  自动确认: ${BOLD}$(if [[ "$AUTO_CONFIRM" == "true" ]]; then echo "是"; else echo "否"; fi)${NC}"
+echo -e "  调试模式: ${BOLD}$(if [[ "$DEBUG" == "true" ]]; then echo "开启"; else echo "关闭"; fi)${NC}"
 echo ""
 
 # 获取私钥
+if [[ "$DEBUG" == "true" ]]; then
+    echo -e "${YELLOW}[DEBUG] 尝试获取私钥${NC}"
+    if [[ -f "$KEY_FILE" ]]; then
+        echo -e "${YELLOW}[DEBUG] 私钥文件存在: $KEY_FILE${NC}"
+        echo -e "${YELLOW}[DEBUG] 私钥文件内容前10个字符: $(head -c 10 "$KEY_FILE" 2>/dev/null || echo "无法读取")...${NC}"
+    else
+        echo -e "${YELLOW}[DEBUG] 私钥文件不存在: $KEY_FILE${NC}"
+    fi
+fi
+
 private_key=$(get_private_key)
 if [[ $? -ne 0 ]]; then
     echo -e "${YELLOW}未找到私钥文件或私钥格式无效。${NC}"
+    
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] get_private_key函数返回错误${NC}"
+    fi
     
     if [[ "$AUTO_CONFIRM" != "true" ]]; then
         echo -e "${CYAN}请手动输入您的私钥 (格式: 0x开头的64位十六进制字符):${NC}"
@@ -189,6 +283,9 @@ if [[ $? -ne 0 ]]; then
         # 验证私钥格式
         if [[ ! $input_private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
             log_error "输入的私钥格式无效"
+            if [[ "$DEBUG" == "true" ]]; then
+                echo -e "${YELLOW}[DEBUG] 输入的私钥: ${input_private_key:0:6}...${NC}"
+            fi
             exit 1
         fi
         
@@ -205,9 +302,23 @@ if [[ $? -ne 0 ]]; then
         log_error "自动模式下需要预先配置私钥文件"
         exit 1
     fi
+else
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] 成功获取私钥: ${private_key:0:6}...${NC}"
+    fi
 fi
 
 # 获取最快的RPC
+if [[ "$DEBUG" == "true" ]]; then
+    echo -e "${YELLOW}[DEBUG] 尝试获取最快RPC${NC}"
+    if [[ -f "$RPC_FILE" ]]; then
+        echo -e "${YELLOW}[DEBUG] RPC缓存文件存在: $RPC_FILE${NC}"
+        echo -e "${YELLOW}[DEBUG] RPC缓存文件内容: $(cat "$RPC_FILE" 2>/dev/null || echo "无法读取")${NC}"
+    else
+        echo -e "${YELLOW}[DEBUG] RPC缓存文件不存在: $RPC_FILE${NC}"
+    fi
+fi
+
 if [[ -f "$RPC_FILE" ]]; then
     fastest_rpc=$(cat "$RPC_FILE")
     echo -e "${CYAN}使用缓存的RPC: ${DIM}$fastest_rpc${NC}"
@@ -219,7 +330,15 @@ if [[ -f "$RPC_FILE" ]]; then
     fi
     
     if [[ "$retest_rpc" =~ ^[yY]$ ]]; then
+        if [[ "$DEBUG" == "true" ]]; then
+            echo -e "${YELLOW}[DEBUG] 开始测试RPC节点${NC}"
+        fi
+        
         find_fastest_rpc || {
+            if [[ "$DEBUG" == "true" ]]; then
+                echo -e "${YELLOW}[DEBUG] RPC测试失败${NC}"
+            fi
+            
             if [[ "$AUTO_CONFIRM" != "true" ]]; then
                 echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
                 read -p "> " input_rpc
@@ -234,7 +353,16 @@ if [[ -f "$RPC_FILE" ]]; then
     fi
 else
     echo -e "${CYAN}正在测试RPC以获取最快节点...${NC}"
+    
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] 开始测试RPC节点${NC}"
+    fi
+    
     find_fastest_rpc || {
+        if [[ "$DEBUG" == "true" ]]; then
+            echo -e "${YELLOW}[DEBUG] RPC测试失败${NC}"
+        fi
+        
         if [[ "$AUTO_CONFIRM" != "true" ]]; then
             echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
             read -p "> " input_rpc
@@ -246,6 +374,10 @@ else
         echo "$fastest_rpc" > "$RPC_FILE"
     }
     fastest_rpc=$(cat "$RPC_FILE")
+fi
+
+if [[ "$DEBUG" == "true" ]]; then
+    echo -e "${YELLOW}[DEBUG] 最终使用的RPC: $fastest_rpc${NC}"
 fi
 
 echo ""
@@ -291,6 +423,11 @@ for ((i=1; i<=BURN_COUNT; i++)); do
     
     # 执行燃烧命令
     # 不再切换目录，直接使用完整路径执行命令
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] 执行燃烧命令:${NC}"
+        echo -e "${YELLOW}[DEBUG] $WORM_MINER_BIN burn --network sepolia --private-key [隐藏] --custom-rpc $fastest_rpc --amount $BURN_AMOUNT --spend $SPEND_AMOUNT --fee $FEE_AMOUNT${NC}"
+    fi
+    
     if "$WORM_MINER_BIN" burn \
         --network sepolia \
         --private-key "$private_key" \
