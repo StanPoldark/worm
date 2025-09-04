@@ -1,7 +1,40 @@
 #!/bin/bash
+set -e
+set -o pipefail
 
-# 导入原始脚本中的函数
-source "$(dirname "$0")/worm_miner.sh"
+# 不再导入外部脚本，直接在本脚本中实现所需功能
+
+# 配置路径
+CONFIG_DIR="$HOME/.worm-miner"
+MINER_DIR="$HOME/miner"
+LOG_FILE="$CONFIG_DIR/miner.log"
+KEY_FILE="$CONFIG_DIR/private.key"
+RPC_FILE="$CONFIG_DIR/fastest_rpc.log"
+BACKUP_DIR="$CONFIG_DIR/backups"
+
+# 尝试多个可能的worm-miner路径
+if [[ -f "$HOME/.cargo/bin/worm-miner" ]]; then
+    WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
+elif [[ -f "$CONFIG_DIR/worm-miner" ]]; then
+    WORM_MINER_BIN="$CONFIG_DIR/worm-miner"
+elif [[ -f "$MINER_DIR/worm-miner" ]]; then
+    WORM_MINER_BIN="$MINER_DIR/worm-miner"
+elif [[ -f "$MINER_DIR/target/release/worm-miner" ]]; then
+    WORM_MINER_BIN="$MINER_DIR/target/release/worm-miner"
+else
+    # 如果找不到，使用默认路径，后续会检查
+    WORM_MINER_BIN="$HOME/.cargo/bin/worm-miner"
+fi
+
+# Enhanced Sepolia RPC list
+SEPOLIA_RPCS=(
+    "https://sepolia.drpc.org"
+    "https://ethereum-sepolia-rpc.publicnode.com" 
+    "https://eth-sepolia.public.blastapi.io"
+    "https://rpc.sepolia.org"
+    "https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161"
+    "https://sepolia.gateway.tenderly.co"
+)
 
 # 颜色定义
 RED='\033[0;31m'
@@ -21,6 +54,118 @@ SPEND_AMOUNT="0.999"
 FEE_AMOUNT="0.001"
 DELAY_SECONDS=3
 
+# 日志函数
+log_info() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] INFO: $1${NC}" | tee -a "$LOG_FILE" 2>/dev/null || true
+}
+
+log_warn() {
+    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $1${NC}" | tee -a "$LOG_FILE" 2>/dev/null || true
+}
+
+log_error() {
+    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" | tee -a "$LOG_FILE" 2>/dev/null || true
+}
+
+# 获取私钥函数
+get_private_key() {
+    if [[ ! -f "$KEY_FILE" ]]; then
+        log_error "私钥文件未找到。请先安装矿工程序。"
+        return 1
+    fi
+    
+    local private_key
+    private_key=$(cat "$KEY_FILE")
+    if [[ ! $private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        log_error "私钥格式无效: $KEY_FILE"
+        return 1
+    fi
+    echo "$private_key"
+}
+
+# 查找最快RPC函数
+find_fastest_rpc() {
+    echo -e "${CYAN}[*] 测试Sepolia RPCs以找到最快的节点...${NC}"
+    
+    local fastest_rpc=""
+    local min_latency=999999
+    local temp_dir="/tmp/rpc_test_$$"
+    mkdir -p "$temp_dir"
+    
+    # 并行测试RPC以获得更快的结果
+    for i in "${!SEPOLIA_RPCS[@]}"; do
+        local rpc="${SEPOLIA_RPCS[$i]}"
+        (
+            # 使用简单的JSON-RPC调用进行测试
+            local start_time=$(date +%s%N)
+            response=$(curl -s --connect-timeout 3 --max-time 8 \
+                -X POST -H "Content-Type: application/json" \
+                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                "$rpc" 2>/dev/null || echo "ERROR")
+            local end_time=$(date +%s%N)
+            
+            if [[ "$response" != "ERROR" ]] && echo "$response" | grep -q "result"; then
+                local latency=$(echo "scale=3; ($end_time - $start_time) / 1000000000" | bc)
+                echo "$latency:$rpc" > "$temp_dir/result_$i"
+                echo -e "  ${DIM}测试 $rpc: ${YELLOW}${latency}s${NC}"
+            else
+                echo "999999:$rpc" > "$temp_dir/result_$i"
+                echo -e "  ${DIM}测试 $rpc: ${RED}失败${NC}"
+            fi
+        ) &
+    done
+    
+    # 等待所有后台任务
+    wait
+    
+    # 找到最快的RPC
+    for result_file in "$temp_dir"/result_*; do
+        if [[ -f "$result_file" ]]; then
+            local result=$(cat "$result_file")
+            local latency="${result%%:*}"
+            local rpc="${result#*:}"
+            
+            if (( $(echo "$latency < $min_latency && $latency > 0" | bc -l) )); then
+                min_latency=$latency
+                fastest_rpc=$rpc
+            fi
+        fi
+    done
+    
+    rm -rf "$temp_dir"
+    
+    if [[ -n "$fastest_rpc" ]]; then
+        echo "$fastest_rpc" > "$RPC_FILE"
+        log_info "已选择最快的RPC: $fastest_rpc (${min_latency}s 延迟)"
+    else
+        log_error "无法找到可用的RPC。请检查您的网络连接。"
+        return 1
+    fi
+}
+
+# 检查worm-miner程序是否存在
+check_worm_miner() {
+    if [[ ! -f "$WORM_MINER_BIN" ]]; then
+        log_error "错误: 未找到 worm-miner 程序: $WORM_MINER_BIN"
+        echo -e "${RED}请确保已正确安装 worm-miner 程序，可能的位置:${NC}"
+        echo -e "  - $HOME/.cargo/bin/worm-miner"
+        echo -e "  - $CONFIG_DIR/worm-miner"
+        echo -e "  - $MINER_DIR/worm-miner"
+        echo -e "  - $MINER_DIR/target/release/worm-miner"
+        return 1
+    fi
+    return 0
+}
+
+# 检查配置目录
+if [[ ! -d "$CONFIG_DIR" ]]; then
+    mkdir -p "$CONFIG_DIR"
+    log_info "创建配置目录: $CONFIG_DIR"
+fi
+
+# 检查worm-miner程序
+check_worm_miner || exit 1
+
 echo -e "${BOLD}${PURPLE}=== 自动循环燃烧脚本 ===${NC}"
 echo -e "${CYAN}配置信息:${NC}"
 echo -e "  燃烧次数: ${BOLD}$BURN_COUNT${NC}"
@@ -28,16 +173,56 @@ echo -e "  每次燃烧: ${BOLD}$BURN_AMOUNT ETH${NC}"
 echo -e "  Spend: ${BOLD}$SPEND_AMOUNT ETH${NC}"
 echo -e "  Fee: ${BOLD}$FEE_AMOUNT ETH${NC}"
 echo -e "  间隔时间: ${BOLD}$DELAY_SECONDS 秒${NC}"
+echo -e "  使用程序: ${DIM}$WORM_MINER_BIN${NC}"
 echo ""
 
 # 获取私钥
-private_key=$(get_private_key) || exit 1
+private_key=$(get_private_key)
+if [[ $? -ne 0 ]]; then
+    echo -e "${YELLOW}未找到私钥文件或私钥格式无效。${NC}"
+    echo -e "${CYAN}请手动输入您的私钥 (格式: 0x开头的64位十六进制字符):${NC}"
+    read -p "> " input_private_key
+    
+    # 验证私钥格式
+    if [[ ! $input_private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        log_error "输入的私钥格式无效"
+        exit 1
+    fi
+    
+    private_key=$input_private_key
+    
+    # 询问是否保存私钥
+    read -p "是否保存私钥到配置文件? [y/N]: " save_key
+    if [[ "$save_key" =~ ^[yY]$ ]]; then
+        echo "$private_key" > "$KEY_FILE"
+        chmod 600 "$KEY_FILE" 2>/dev/null || true
+        log_info "私钥已保存到: $KEY_FILE"
+    fi
+fi
 
 # 获取最快的RPC
 if [[ -f "$RPC_FILE" ]]; then
     fastest_rpc=$(cat "$RPC_FILE")
+    echo -e "${CYAN}使用缓存的RPC: ${DIM}$fastest_rpc${NC}"
+    
+    # 询问是否重新测试RPC
+    read -p "是否重新测试RPC以获取最快节点? [y/N]: " retest_rpc
+    if [[ "$retest_rpc" =~ ^[yY]$ ]]; then
+        find_fastest_rpc || {
+            echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
+            read -p "> " input_rpc
+            fastest_rpc=$input_rpc
+            echo "$fastest_rpc" > "$RPC_FILE"
+        }
+    fi
 else
-    find_fastest_rpc
+    echo -e "${CYAN}正在测试RPC以获取最快节点...${NC}"
+    find_fastest_rpc || {
+        echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
+        read -p "> " input_rpc
+        fastest_rpc=$input_rpc
+        echo "$fastest_rpc" > "$RPC_FILE"
+    }
     fastest_rpc=$(cat "$RPC_FILE")
 fi
 
@@ -71,7 +256,7 @@ for ((i=1; i<=BURN_COUNT; i++)); do
     echo -e "${CYAN}[*] 执行第 $i/$BURN_COUNT 次燃烧...${NC}"
     
     # 执行燃烧命令
-    cd "$MINER_DIR"
+    # 不再切换目录，直接使用完整路径执行命令
     if "$WORM_MINER_BIN" burn \
         --network sepolia \
         --private-key "$private_key" \
