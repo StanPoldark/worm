@@ -61,7 +61,12 @@ SPEND_AMOUNT="0.999"
 FEE_AMOUNT="0.001"
 DELAY_SECONDS=3
 AUTO_CONFIRM=true  # 设置为true自动确认所有提示，false则需要手动确认
-DEBUG=true  # 设置为true输出调试信息
+DEBUG=false  # 设置为true输出调试信息
+
+# 脚本开始时输出调试信息
+if [[ "$DEBUG" == "true" ]]; then
+    echo -e "${YELLOW}[DEBUG] 调试模式已启用${NC}"
+fi
 
 # 日志函数
 log_info() {
