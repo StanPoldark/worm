@@ -62,6 +62,7 @@ FEE_AMOUNT="0.001"
 DELAY_SECONDS=3
 AUTO_CONFIRM=true  # 设置为true自动确认所有提示，false则需要手动确认
 DEBUG=false  # 设置为true输出调试信息
+CMD_PRIVATE_KEY=""  # 命令行传入的私钥
 
 # 脚本开始时输出调试信息
 if [[ "$DEBUG" == "true" ]]; then
@@ -83,6 +84,16 @@ log_error() {
 
 # 获取私钥函数
 get_private_key() {
+    # 如果命令行参数中提供了私钥，优先使用
+    if [[ -n "$CMD_PRIVATE_KEY" ]]; then
+        if [[ ! $CMD_PRIVATE_KEY =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+            log_error "命令行提供的私钥格式无效"
+            return 1
+        fi
+        echo "$CMD_PRIVATE_KEY"
+        return 0
+    fi
+    
     if [[ ! -f "$KEY_FILE" ]]; then
         log_error "私钥文件未找到。请先安装矿工程序。"
         return 1
@@ -208,6 +219,10 @@ if [[ $# -gt 0 ]]; then
                 DEBUG=true
                 shift
                 ;;
+            --key|-k)
+                CMD_PRIVATE_KEY="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo -e "${BOLD}使用方法:${NC}"
                 echo -e "  $0 [选项]"
@@ -217,6 +232,7 @@ if [[ $# -gt 0 ]]; then
                 echo -e "  --spend, -s NUMBER    设置spend金额 (默认: $SPEND_AMOUNT ETH)"
                 echo -e "  --fee, -f NUMBER      设置fee金额 (默认: $FEE_AMOUNT ETH)"
                 echo -e "  --delay, -d SECONDS   设置燃烧间隔时间 (默认: $DELAY_SECONDS 秒)"
+                echo -e "  --key, -k KEY         直接指定私钥 (格式: 0x开头的64位十六进制)"
                 echo -e "  --manual              启用手动确认模式"
                 echo -e "  --debug               启用调试模式"
                 echo -e "  --help, -h            显示此帮助信息"
@@ -265,11 +281,14 @@ echo ""
 # 获取私钥
 if [[ "$DEBUG" == "true" ]]; then
     echo -e "${YELLOW}[DEBUG] 尝试获取私钥${NC}"
-    if [[ -f "$KEY_FILE" ]]; then
+    if [[ -n "$CMD_PRIVATE_KEY" ]]; then
+        echo -e "${YELLOW}[DEBUG] 使用命令行传入的私钥: ${CMD_PRIVATE_KEY:0:6}...${NC}"
+    elif [[ -f "$KEY_FILE" ]]; then
         echo -e "${YELLOW}[DEBUG] 私钥文件存在: $KEY_FILE${NC}"
         echo -e "${YELLOW}[DEBUG] 私钥文件内容前10个字符: $(head -c 10 "$KEY_FILE" 2>/dev/null || echo "无法读取")...${NC}"
     else
         echo -e "${YELLOW}[DEBUG] 私钥文件不存在: $KEY_FILE${NC}"
+        echo -e "${YELLOW}[DEBUG] 请使用 --key 参数指定私钥或创建私钥文件${NC}"
     fi
 fi
 
