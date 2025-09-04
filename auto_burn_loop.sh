@@ -166,19 +166,13 @@ check_worm_miner() {
     return 0
 }
 
-# 检查配置目录
-if [[ ! -d "$CONFIG_DIR" ]]; then
-    mkdir -p "$CONFIG_DIR"
-    log_info "创建配置目录: $CONFIG_DIR"
-fi
-
 # 处理命令行参数
 if [[ $# -gt 0 ]]; then
     if [[ "$DEBUG" == "true" ]]; then
         echo -e "${YELLOW}[DEBUG] 接收到命令行参数: $@${NC}"
     fi
     
-    # 解析命令行参数
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
             --count|-c)
@@ -230,6 +224,12 @@ if [[ $# -gt 0 ]]; then
                 ;;
         esac
     done
+fi
+
+# 检查配置目录
+if [[ ! -d "$CONFIG_DIR" ]]; then
+    mkdir -p "$CONFIG_DIR"
+    log_info "创建配置目录: $CONFIG_DIR"
 fi
 
 # 检查worm-miner程序
