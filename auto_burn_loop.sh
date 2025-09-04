@@ -53,6 +53,7 @@ BURN_AMOUNT="1"
 SPEND_AMOUNT="0.999"
 FEE_AMOUNT="0.001"
 DELAY_SECONDS=3
+AUTO_CONFIRM=true  # 设置为true自动确认所有提示，false则需要手动确认
 
 # 日志函数
 log_info() {
@@ -180,23 +181,29 @@ echo ""
 private_key=$(get_private_key)
 if [[ $? -ne 0 ]]; then
     echo -e "${YELLOW}未找到私钥文件或私钥格式无效。${NC}"
-    echo -e "${CYAN}请手动输入您的私钥 (格式: 0x开头的64位十六进制字符):${NC}"
-    read -p "> " input_private_key
     
-    # 验证私钥格式
-    if [[ ! $input_private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
-        log_error "输入的私钥格式无效"
+    if [[ "$AUTO_CONFIRM" != "true" ]]; then
+        echo -e "${CYAN}请手动输入您的私钥 (格式: 0x开头的64位十六进制字符):${NC}"
+        read -p "> " input_private_key
+        
+        # 验证私钥格式
+        if [[ ! $input_private_key =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+            log_error "输入的私钥格式无效"
+            exit 1
+        fi
+        
+        private_key=$input_private_key
+        
+        # 询问是否保存私钥
+        read -p "是否保存私钥到配置文件? [y/N]: " save_key
+        if [[ "$save_key" =~ ^[yY]$ ]]; then
+            echo "$private_key" > "$KEY_FILE"
+            chmod 600 "$KEY_FILE" 2>/dev/null || true
+            log_info "私钥已保存到: $KEY_FILE"
+        fi
+    else
+        log_error "自动模式下需要预先配置私钥文件"
         exit 1
-    fi
-    
-    private_key=$input_private_key
-    
-    # 询问是否保存私钥
-    read -p "是否保存私钥到配置文件? [y/N]: " save_key
-    if [[ "$save_key" =~ ^[yY]$ ]]; then
-        echo "$private_key" > "$KEY_FILE"
-        chmod 600 "$KEY_FILE" 2>/dev/null || true
-        log_info "私钥已保存到: $KEY_FILE"
     fi
 fi
 
@@ -206,21 +213,36 @@ if [[ -f "$RPC_FILE" ]]; then
     echo -e "${CYAN}使用缓存的RPC: ${DIM}$fastest_rpc${NC}"
     
     # 询问是否重新测试RPC
-    read -p "是否重新测试RPC以获取最快节点? [y/N]: " retest_rpc
+    retest_rpc="n"
+    if [[ "$AUTO_CONFIRM" != "true" ]]; then
+        read -p "是否重新测试RPC以获取最快节点? [y/N]: " retest_rpc
+    fi
+    
     if [[ "$retest_rpc" =~ ^[yY]$ ]]; then
         find_fastest_rpc || {
-            echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
-            read -p "> " input_rpc
-            fastest_rpc=$input_rpc
-            echo "$fastest_rpc" > "$RPC_FILE"
+            if [[ "$AUTO_CONFIRM" != "true" ]]; then
+                echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
+                read -p "> " input_rpc
+                fastest_rpc=$input_rpc
+                echo "$fastest_rpc" > "$RPC_FILE"
+            else
+                log_error "自动模式下RPC测试失败，使用默认RPC"
+                fastest_rpc="https://sepolia.drpc.org"
+                echo "$fastest_rpc" > "$RPC_FILE"
+            fi
         }
     fi
 else
     echo -e "${CYAN}正在测试RPC以获取最快节点...${NC}"
     find_fastest_rpc || {
-        echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
-        read -p "> " input_rpc
-        fastest_rpc=$input_rpc
+        if [[ "$AUTO_CONFIRM" != "true" ]]; then
+            echo -e "${YELLOW}RPC测试失败，请手动输入RPC地址:${NC}"
+            read -p "> " input_rpc
+            fastest_rpc=$input_rpc
+        else
+            log_error "自动模式下RPC测试失败，使用默认RPC"
+            fastest_rpc="https://sepolia.drpc.org"
+        fi
         echo "$fastest_rpc" > "$RPC_FILE"
     }
     fastest_rpc=$(cat "$RPC_FILE")
@@ -232,7 +254,19 @@ echo -e "  将执行 ${BOLD}$BURN_COUNT${NC} 次燃烧操作"
 echo -e "  总共需要 ${BOLD}$(echo "scale=3; $BURN_COUNT * $BURN_AMOUNT" | bc) ETH${NC}"
 echo -e "  使用RPC: ${DIM}$fastest_rpc${NC}"
 echo ""
-read -p "确认开始自动燃烧? [y/N]: " confirm
+# 如果是自动模式，则自动确认
+if [[ "$AUTO_CONFIRM" == "true" ]]; then
+    confirm="y"
+    echo -e "${GREEN}自动模式：已自动确认燃烧操作${NC}"
+else
+    echo -e "${RED}${BOLD}请输入 'y' 确认开始燃烧，或按其他键取消${NC}"
+    read -p "确认开始自动燃烧? [y/N]: " confirm
+    
+    # 默认为不确认
+    if [[ -z "$confirm" ]]; then
+        confirm="n"
+    fi
+fi
 
 if [[ ! "$confirm" =~ ^[yY]$ ]]; then
     echo -e "${YELLOW}操作已取消${NC}"
